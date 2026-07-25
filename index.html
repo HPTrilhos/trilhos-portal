@@ -32,7 +32,7 @@
       </div>
     </section>
 
-    <!-- Estado: autenticado (Fase P1 — so confirma a sessao; o mapa vem nas fases seguintes) -->
+    <!-- Estado: autenticado (Fase P1 confirma a sessao; Fase P2 le a Drive) -->
     <section id="view-authed" class="view" hidden>
       <div class="session-card">
         <img id="user-avatar" class="avatar" alt="">
@@ -42,7 +42,20 @@
         </div>
         <button id="btn-signout" class="btn-secondary">Terminar sessão</button>
       </div>
-      <p class="status-note" id="status-note">Ligado à tua conta Google. A leitura dos percursos chega numa próxima fase.</p>
+
+      <div id="drive-gate" class="drive-gate">
+        <p class="status-note">Falta autorizar o acesso à pasta <strong>Trilhos/</strong> na tua Google Drive (só os ficheiros criados pela app — nada mais é tocado).</p>
+        <button id="btn-load" class="btn-primary">Ver os meus percursos</button>
+      </div>
+
+      <div id="track-area" hidden>
+        <div class="list-header">
+          <h2>Os teus percursos</h2>
+          <button id="btn-refresh" class="btn-secondary" title="Voltar a consultar a Drive">Atualizar</button>
+        </div>
+        <p id="load-status" class="status-note"></p>
+        <ul id="track-list" class="track-list"></ul>
+      </div>
     </section>
   </main>
 

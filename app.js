@@ -1,24 +1,36 @@
-// Trilhos Portal — Fase P1: esqueleto + login
+// Trilhos Portal — Fase P2: leitura da Drive + cache
 //
-// Usa a biblioteca Google Identity Services (GIS) para autenticacao.
-// Nesta fase confirmamos apenas que o login funciona e mostramos a
-// identidade da conta (nome, email, foto). A leitura da Google Drive
-// (com o scope drive.file) entra na Fase P2.
+// Fase P1: login com Google Identity Services (ID token), so identidade.
+// Fase P2 (esta): pede um token de acesso com o scope drive.file,
+// le a pasta Trilhos/, descarrega cada GPX (uma vez, com cache local
+// por data de modificacao) e mostra uma lista simples de percursos.
+// O mapa e os pinos entram na Fase P3.
 
-// Client ID Web do projeto trilhos-498408 (o mesmo cliente da app e da PWA).
-// E um identificador publico — nao e um segredo, pode viver no codigo do browser.
 const CLIENT_ID = '271389330523-4jg4e39cgf31v7mecjabj4hji6pjug1k.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const CACHE_KEY = 'trilhos_portal_cache_v1';
+const SESSION_KEY = 'trilhos_portal_session';
 
 const viewLogin = document.getElementById('view-login');
 const viewAuthed = document.getElementById('view-authed');
 const userAvatar = document.getElementById('user-avatar');
 const userEmail = document.getElementById('user-email');
 const btnSignout = document.getElementById('btn-signout');
+const driveGate = document.getElementById('drive-gate');
+const btnLoad = document.getElementById('btn-load');
+const btnRefresh = document.getElementById('btn-refresh');
+const trackArea = document.getElementById('track-area');
+const loadStatus = document.getElementById('load-status');
+const trackList = document.getElementById('track-list');
 
-const SESSION_KEY = 'trilhos_portal_session';
+let tokenClient = null;
+let accessToken = null;
+
+// ---------------------------------------------------------------
+// Sessao (identidade) — Fase P1, inalterado
+// ---------------------------------------------------------------
 
 function decodeJwt(token) {
-  // O ID token e um JWT: header.payload.assinatura, em base64url.
   const payload = token.split('.')[1];
   const json = atob(payload.replace(/-/g, '+').replace(/_/g, '/'));
   return JSON.parse(decodeURIComponent(escape(json)));
@@ -34,6 +46,9 @@ function showAuthed(profile) {
 function showLogin() {
   viewLogin.hidden = false;
   viewAuthed.hidden = true;
+  driveGate.hidden = false;
+  trackArea.hidden = true;
+  accessToken = null;
 }
 
 function handleCredentialResponse(response) {
@@ -46,8 +61,217 @@ function handleCredentialResponse(response) {
   }
 }
 
+// ---------------------------------------------------------------
+// Acesso a Drive (Fase P2)
+// ---------------------------------------------------------------
+
+function ensureTokenClient() {
+  if (tokenClient) return tokenClient;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (resp) => {
+      if (resp.error) {
+        loadStatus.textContent = 'Não foi possível autorizar o acesso à Drive. Tenta novamente.';
+        return;
+      }
+      accessToken = resp.access_token;
+      loadTracks();
+    },
+  });
+  return tokenClient;
+}
+
+function driveHeaders() {
+  return { Authorization: `Bearer ${accessToken}` };
+}
+
+async function findTrilhosFolder() {
+  const q = encodeURIComponent(
+    "name='Trilhos' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents"
+  );
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
+    headers: driveHeaders(),
+  });
+  if (!resp.ok) throw new Error('Não foi possível consultar a Google Drive.');
+  const data = await resp.json();
+  return (data.files && data.files[0]) ? data.files[0].id : null;
+}
+
+async function listGpxFiles(folderId) {
+  const q = encodeURIComponent(
+    `'${folderId}' in parents and trashed=false and mimeType != 'application/vnd.google-apps.folder'`
+  );
+  const resp = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=1000`,
+    { headers: driveHeaders() }
+  );
+  if (!resp.ok) throw new Error('Não foi possível listar os ficheiros da pasta Trilhos/.');
+  const data = await resp.json();
+  return (data.files || []).filter((f) => f.name.toLowerCase().endsWith('.gpx'));
+}
+
+async function downloadGpx(fileId) {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+    headers: driveHeaders(),
+  });
+  if (!resp.ok) throw new Error('Não foi possível descarregar um percurso.');
+  return resp.text();
+}
+
+// ---------------------------------------------------------------
+// Parser leve: le so os metadados do cabecalho GPX (a mesma
+// estrutura <metadata><extensions> escrita pelo gpx_service.dart
+// da app). Nao le os milhares de <trkpt> em detalhe — so o
+// primeiro, para a Fase P3 saber onde colocar o pino.
+// ---------------------------------------------------------------
+
+function parseGpxMeta(xmlText, fallbackName) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) return null;
+
+  const metadata = doc.getElementsByTagName('metadata')[0] || null;
+  const metaExt = metadata ? metadata.getElementsByTagName('extensions')[0] : null;
+
+  const ext = {};
+  if (metaExt) {
+    for (const child of metaExt.children) {
+      // "trilhos:distanceMeters" -> localName "distanceMeters"
+      ext[child.localName] = child.textContent.trim();
+    }
+  }
+
+  const trk = doc.getElementsByTagName('trk')[0];
+  const trkName = trk ? trk.getElementsByTagName('name')[0]?.textContent : null;
+  const metaName = metadata ? metadata.getElementsByTagName('name')[0]?.textContent : null;
+  const metaTime = metadata ? metadata.getElementsByTagName('time')[0]?.textContent : null;
+
+  const firstPt = doc.getElementsByTagName('trkpt')[0];
+  const lat = firstPt ? parseFloat(firstPt.getAttribute('lat')) : null;
+  const lon = firstPt ? parseFloat(firstPt.getAttribute('lon')) : null;
+
+  return {
+    name: metaName || trkName || fallbackName,
+    date: metaTime ? new Date(metaTime) : null,
+    activity: ext.activity || (trk?.getElementsByTagName('type')[0]?.textContent === 'cycling' ? 'bike' : 'walk'),
+    locality: ext.locality || null,
+    distanceKm: ext.distanceMeters ? parseFloat(ext.distanceMeters) / 1000 : null,
+    elevGain: ext.elevGain ? parseFloat(ext.elevGain) : null,
+    lat, lon,
+  };
+}
+
+// ---------------------------------------------------------------
+// Cache local (localStorage): evita descarregar de novo um GPX
+// cujo modifiedTime na Drive nao mudou desde a ultima visita.
+// ---------------------------------------------------------------
+
+function loadCache() {
+  try {
+    return JSON.parse(localStorage.getItem(CACHE_KEY)) || {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function saveCache(cache) {
+  localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+}
+
+// ---------------------------------------------------------------
+// Fluxo principal
+// ---------------------------------------------------------------
+
+async function loadTracks() {
+  driveGate.hidden = true;
+  trackArea.hidden = false;
+  loadStatus.textContent = 'A consultar a Google Drive…';
+  trackList.innerHTML = '';
+
+  try {
+    const folderId = await findTrilhosFolder();
+    if (!folderId) {
+      loadStatus.textContent = 'Ainda não existe a pasta Trilhos/ na tua Drive — sincroniza um percurso na app primeiro.';
+      return;
+    }
+
+    const files = await listGpxFiles(folderId);
+    const cache = loadCache();
+    const tracks = [];
+    let downloaded = 0;
+
+    for (const file of files) {
+      const cached = cache[file.id];
+      if (cached && cached.modifiedTime === file.modifiedTime) {
+        tracks.push(cached.meta);
+        continue;
+      }
+      loadStatus.textContent = `A descarregar percursos… (${++downloaded})`;
+      try {
+        const xml = await downloadGpx(file.id);
+        const meta = parseGpxMeta(xml, file.name);
+        if (meta) {
+          cache[file.id] = { modifiedTime: file.modifiedTime, meta };
+          tracks.push(meta);
+        }
+      } catch (err) {
+        console.warn(`Não foi possível ler ${file.name}:`, err);
+      }
+    }
+
+    saveCache(cache);
+    renderTracks(tracks);
+    loadStatus.textContent = `${tracks.length} percurso${tracks.length === 1 ? '' : 's'} encontrado${tracks.length === 1 ? '' : 's'} na Drive.`;
+  } catch (err) {
+    console.error(err);
+    loadStatus.textContent = err.message || 'Ocorreu um erro a ler a Google Drive.';
+  }
+}
+
+function renderTracks(tracks) {
+  trackList.innerHTML = '';
+  if (tracks.length === 0) {
+    const li = document.createElement('li');
+    li.className = 'track-empty';
+    li.textContent = 'Sem percursos para mostrar.';
+    trackList.appendChild(li);
+    return;
+  }
+
+  tracks.sort((a, b) => (b.date || 0) - (a.date || 0));
+
+  for (const t of tracks) {
+    const li = document.createElement('li');
+    li.className = 'track-item';
+
+    const icon = document.createElement('div');
+    icon.className = 'track-icon';
+    icon.textContent = t.activity === 'bike' ? '🚴' : '🚶';
+
+    const info = document.createElement('div');
+    info.className = 'track-info';
+
+    const name = document.createElement('span');
+    name.className = 'track-name';
+    name.textContent = t.locality ? `${t.locality} — ${t.name}` : t.name;
+
+    const meta = document.createElement('span');
+    meta.className = 'track-meta';
+    const dateStr = t.date ? t.date.toLocaleDateString('pt-PT') : '';
+    const kmStr = t.distanceKm != null ? `${t.distanceKm.toFixed(2)} km` : '';
+    meta.textContent = [dateStr, kmStr].filter(Boolean).join(' · ');
+
+    info.append(name, meta);
+    li.append(icon, info);
+    trackList.appendChild(li);
+  }
+}
+
+// ---------------------------------------------------------------
+// Arranque
+// ---------------------------------------------------------------
+
 function init() {
-  // Restaurar sessao desta aba, se existir (sessionStorage: dura so a sessao do browser)
   const saved = sessionStorage.getItem(SESSION_KEY);
   if (saved) {
     try {
@@ -58,7 +282,6 @@ function init() {
   }
 
   if (!window.google || !google.accounts || !google.accounts.id) {
-    // Biblioteca do Google ainda nao carregou (rede lenta); tenta de novo em breve.
     setTimeout(init, 300);
     return;
   }
@@ -81,6 +304,15 @@ btnSignout.addEventListener('click', () => {
     google.accounts.id.disableAutoSelect();
   }
   showLogin();
+});
+
+btnLoad.addEventListener('click', () => {
+  ensureTokenClient().requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+});
+
+btnRefresh.addEventListener('click', () => {
+  if (!accessToken) return;
+  loadTracks();
 });
 
 init();
