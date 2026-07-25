@@ -1,0 +1,136 @@
+:root {
+  --green: #2E7D32;
+  --green-dark: #1B5E20;
+  --green-pale: #E8F5E9;
+  --ink: #1C231D;
+  --ink-soft: #55605A;
+  --paper: #FAFBF8;
+  --line: #DDE3DC;
+  --amber: #E8B84B;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: "Segoe UI", Roboto, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* ---- topbar ---- */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; }
+
+.leaf { width: 30px; height: 30px; display: inline-flex; }
+.leaf svg { width: 100%; height: 100%; }
+.leaf path { fill: var(--green); }
+.leaf .vein { fill: none; stroke: #fff; stroke-width: 4; }
+
+.brand-name {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--green-dark);
+  letter-spacing: 0.2px;
+}
+
+/* ---- hero (nao autenticado) ---- */
+main { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+
+.view { padding: 64px 0; }
+
+.hero h1 {
+  font-size: clamp(28px, 5vw, 40px);
+  line-height: 1.15;
+  margin: 0 0 16px;
+  color: var(--ink);
+}
+
+.hero p {
+  font-size: 16px;
+  color: var(--ink-soft);
+  max-width: 46ch;
+  line-height: 1.6;
+  margin: 0 0 32px;
+}
+
+/* O botao do Google Identity Services renderiza-se sozinho dentro de #g_id_signin */
+#g_id_signin { display: inline-block; }
+
+/* ---- sessao ativa ---- */
+.session-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-top: 12px;
+}
+
+.avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px solid var(--green-pale);
+  object-fit: cover;
+}
+
+.session-label {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.session-email {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.btn-secondary {
+  margin-left: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-size: 14px;
+  padding: 9px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.btn-secondary:hover { background: var(--green-pale); border-color: var(--green); }
+.btn-secondary:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+
+.status-note {
+  margin-top: 20px;
+  font-size: 14px;
+  color: var(--ink-soft);
+}
+
+/* ---- footer ---- */
+.footer {
+  text-align: center;
+  padding: 24px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 480px) {
+  .session-card { flex-wrap: wrap; }
+  .btn-secondary { margin-left: 0; width: 100%; }
+}

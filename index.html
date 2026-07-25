@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Trilhos — Portal</title>
+<link rel="stylesheet" href="style.css">
+<!-- Google Identity Services: biblioteca oficial para login Google em paginas estaticas -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="leaf" aria-hidden="true">
+        <svg viewBox="0 0 100 100"><path d="M50,10 C74,32 82,58 65,80 C57,90 50,92 50,92 C50,92 43,90 35,80 C18,58 26,32 50,10 Z"/><path d="M50,18 L50,84" class="vein"/></svg>
+      </span>
+      <span class="brand-name">Trilhos</span>
+    </div>
+    <div id="auth-area">
+      <div id="g_id_signin"></div>
+    </div>
+  </header>
+
+  <main id="app-root">
+    <!-- Estado: nao autenticado -->
+    <section id="view-login" class="view">
+      <div class="hero">
+        <h1>Os teus percursos, no mapa.</h1>
+        <p>Inicia sessão com a conta Google associada à app Trilhos para veres as
+           tuas caminhadas e percursos de bicicleta guardados na tua Drive.</p>
+      </div>
+    </section>
+
+    <!-- Estado: autenticado (Fase P1 — so confirma a sessao; o mapa vem nas fases seguintes) -->
+    <section id="view-authed" class="view" hidden>
+      <div class="session-card">
+        <img id="user-avatar" class="avatar" alt="">
+        <div>
+          <p class="session-label">Sessão iniciada como</p>
+          <p id="user-email" class="session-email">—</p>
+        </div>
+        <button id="btn-signout" class="btn-secondary">Terminar sessão</button>
+      </div>
+      <p class="status-note" id="status-note">Ligado à tua conta Google. A leitura dos percursos chega numa próxima fase.</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Trilhos Portal · Hugo Pereira</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
