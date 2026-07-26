@@ -224,17 +224,214 @@ function zoneMarkerIcon(count) {
   });
 }
 
-function popupHtml(zone) {
-  const list = [...zone.tracks]
-    .sort((a, b) => (b.date || 0) - (a.date || 0))
-    .map((t) => {
-      const km = t.distanceKm != null ? `${t.distanceKm.toFixed(2)} km` : '';
-      const icon = t.activity === 'bike' ? '🚴' : '🚶';
-      const dateStr = t.date ? t.date.toLocaleDateString('pt-PT') : '';
-      return `<div class="popup-track"><span class="n">${icon} ${t.name}<br><small>${dateStr}</small></span><span class="k">${km}</span></div>`;
-    })
-    .join('');
-  return `<div class="popup-zone"><h3>${zone.label}</h3>${list}</div>`;
+// ---- Painel lateral: lista da zona -> detalhe do percurso ----
+const zonePanel = document.getElementById('zone-panel');
+const panelListView = document.getElementById('panel-list-view');
+const panelDetailView = document.getElementById('panel-detail-view');
+const panelZoneTitle = document.getElementById('panel-zone-title');
+const panelTrackList = document.getElementById('panel-track-list');
+const panelClose = document.getElementById('panel-close');
+const panelBack = document.getElementById('panel-back');
+const detailName = document.getElementById('detail-name');
+const detailDate = document.getElementById('detail-date');
+const detailMetrics = document.getElementById('detail-metrics');
+const elevWrap = document.getElementById('elev-wrap');
+const elevChart = document.getElementById('elev-chart');
+const elevMinLabel = document.getElementById('elev-min');
+const elevMaxLabel = document.getElementById('elev-max');
+
+let allBounds = null;
+let selectedLayer = null;
+const fullGpxCache = {}; // fileId -> parsed detail (evita reler o mesmo percurso duas vezes na mesma visita
+
+function openZonePanel(zone) {
+  zonePanel.hidden = false;
+  panelListView.hidden = false;
+  panelDetailView.hidden = true;
+  panelZoneTitle.textContent = zone.label;
+  panelTrackList.innerHTML = '';
+
+  const sorted = [...zone.tracks].sort((a, b) => (b.date || 0) - (a.date || 0));
+  for (const t of sorted) {
+    const li = document.createElement('li');
+    const btn = document.createElement('button');
+    btn.className = 'panel-track-item';
+    btn.innerHTML = `
+      <span class="pt-icon">${t.activity === 'bike' ? '🚴' : '🚶'}</span>
+      <span class="pt-info">
+        <span class="pt-name">${t.name}</span>
+        <span class="pt-meta">${t.date ? t.date.toLocaleDateString('pt-PT') : ''} · ${t.distanceKm != null ? t.distanceKm.toFixed(2) + ' km' : ''}</span>
+      </span>`;
+    btn.addEventListener('click', () => openTrackDetail(t));
+    li.appendChild(btn);
+    panelTrackList.appendChild(li);
+  }
+}
+
+function closePanel() {
+  zonePanel.hidden = true;
+  clearSelectedTrack();
+}
+
+function clearSelectedTrack() {
+  if (selectedLayer) selectedLayer.clearLayers();
+  if (allBounds) map.fitBounds(allBounds, { padding: [32, 32] });
+}
+
+panelClose.addEventListener('click', closePanel);
+panelBack.addEventListener('click', () => {
+  panelDetailView.hidden = true;
+  panelListView.hidden = false;
+  clearSelectedTrack();
+});
+
+function fmtDuration(totalSeconds) {
+  if (totalSeconds == null) return '—';
+  const h = Math.floor(totalSeconds / 3600);
+  const m = Math.floor((totalSeconds % 3600) / 60);
+  const s = Math.round(totalSeconds % 60);
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${m}m${String(s).padStart(2, '0')}s`;
+}
+
+function metricHtml(label, value) {
+  return `<div class="metric"><span class="m-label">${label}</span><span class="m-value">${value}</span></div>`;
+}
+
+// Perfil de elevacao: caminho SVG simples, sem bibliotecas de graficos.
+// Eixo X = distancia acumulada, eixo Y = altitude (so pontos com <ele>).
+function buildElevationProfile(points, cumDist) {
+  const valid = [];
+  for (let i = 0; i < points.length; i++) {
+    if (points[i].ele != null) valid.push({ d: cumDist[i], e: points[i].ele });
+  }
+  if (valid.length < 2) return null;
+
+  const totalD = valid[valid.length - 1].d || 1;
+  const eles = valid.map((p) => p.e);
+  const eMin = Math.min(...eles);
+  const eMax = Math.max(...eles);
+  const range = Math.max(eMax - eMin, 1);
+  const W = 400, H = 130, PAD = 6;
+
+  const coords = valid.map((p) => {
+    const x = (p.d / totalD) * W;
+    const y = PAD + (1 - (p.e - eMin) / range) * (H - PAD * 2);
+    return [x, y];
+  });
+
+  const linePoints = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+  const areaPoints = `0,${H} ${linePoints} ${W},${H}`;
+
+  return { linePoints, areaPoints, eMin, eMax };
+}
+
+async function openTrackDetail(track) {
+  panelListView.hidden = true;
+  panelDetailView.hidden = false;
+  detailName.textContent = track.name;
+  detailDate.textContent = track.date ? track.date.toLocaleDateString('pt-PT') : '';
+  detailMetrics.innerHTML = `<p class="loading-note">A carregar percurso…</p>`;
+  elevWrap.hidden = true;
+
+  try {
+    let detail = fullGpxCache[track.fileId];
+    if (!detail) {
+      const xml = await downloadGpx(track.fileId);
+      detail = parseGpxFull(xml);
+      if (detail) fullGpxCache[track.fileId] = detail;
+    }
+    if (!detail) {
+      detailMetrics.innerHTML = `<p class="loading-note">Não foi possível ler este percurso.</p>`;
+      return;
+    }
+
+    const metrics = [
+      metricHtml('Distância', `${detail.distanceKm.toFixed(2)} km`),
+      metricHtml('Duração', fmtDuration(detail.durationSeconds)),
+    ];
+    if (detail.movingSeconds != null && detail.movingSeconds !== detail.durationSeconds) {
+      metrics.push(metricHtml('Em movimento', fmtDuration(detail.movingSeconds)));
+    }
+    if (detail.avgSpeedKmh != null) metrics.push(metricHtml('Vel. média', `${detail.avgSpeedKmh.toFixed(1)} km/h`));
+    if (detail.steps != null) metrics.push(metricHtml('Passos', detail.steps));
+    if (detail.elevGain != null) metrics.push(metricHtml('Subida', `${detail.elevGain.toFixed(0)} m`));
+    if (detail.elevLoss != null) metrics.push(metricHtml('Descida', `${detail.elevLoss.toFixed(0)} m`));
+    if (detail.pauseSeconds) metrics.push(metricHtml('Pausas', fmtDuration(detail.pauseSeconds)));
+    detailMetrics.innerHTML = metrics.join('');
+
+    const profile = buildElevationProfile(detail.points, detail.cumDist);
+    if (profile) {
+      elevWrap.hidden = false;
+      elevChart.innerHTML = `
+        <polygon points="${profile.areaPoints}" fill="#E8F5E9" />
+        <polyline points="${profile.linePoints}" fill="none" stroke="#2E7D32" stroke-width="2.5" />`;
+      elevMinLabel.textContent = `${profile.eMin.toFixed(0)} m`;
+      elevMaxLabel.textContent = `${profile.eMax.toFixed(0)} m`;
+    }
+
+    // Desenhar o tracado completo no mapa
+    if (selectedLayer) selectedLayer.clearLayers();
+    const latlngs = detail.points.map((p) => [p.lat, p.lon]);
+    const poly = L.polyline(latlngs, { color: '#2E7D32', weight: 4 }).addTo(selectedLayer);
+    L.circleMarker(latlngs[0], { radius: 6, color: '#fff', weight: 2, fillColor: '#2E7D32', fillOpacity: 1 }).addTo(selectedLayer);
+    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color: '#fff', weight: 2, fillColor: '#C62828', fillOpacity: 1 }).addTo(selectedLayer);
+    map.fitBounds(poly.getBounds(), { padding: [28, 28] });
+  } catch (err) {
+    console.error(err);
+    detailMetrics.innerHTML = `<p class="loading-note">Erro ao carregar o percurso.</p>`;
+  }
+}
+
+// Parser completo: le todos os pontos do trajeto (para o tracado e o
+// perfil de elevacao) e as metricas do cabecalho GPX. So chamado
+// quando o utilizador expande um percurso especifico (nao a todos).
+function parseGpxFull(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  if (doc.querySelector('parsererror')) return null;
+
+  const metadata = doc.getElementsByTagName('metadata')[0] || null;
+  const metaExt = metadata ? metadata.getElementsByTagName('extensions')[0] : null;
+  const ext = {};
+  if (metaExt) {
+    for (const child of metaExt.children) ext[child.localName] = child.textContent.trim();
+  }
+
+  const points = [];
+  for (const pt of doc.getElementsByTagName('trkpt')) {
+    const lat = parseFloat(pt.getAttribute('lat'));
+    const lon = parseFloat(pt.getAttribute('lon'));
+    const eleEl = pt.getElementsByTagName('ele')[0];
+    points.push({ lat, lon, ele: eleEl ? parseFloat(eleEl.textContent) : null });
+  }
+  if (points.length < 2) return null;
+
+  let cum = 0;
+  const cumDist = [0];
+  for (let i = 1; i < points.length; i++) {
+    cum += haversineM(points[i - 1].lat, points[i - 1].lon, points[i].lat, points[i].lon);
+    cumDist.push(cum);
+  }
+
+  const distanceKm = ext.distanceMeters ? parseFloat(ext.distanceMeters) / 1000 : cum / 1000;
+  const durationSeconds = ext.durationSeconds ? parseInt(ext.durationSeconds, 10) : null;
+  const movingSeconds = ext.movingSeconds ? parseInt(ext.movingSeconds, 10) : durationSeconds;
+  const avgSpeedKmh = ext.avgSpeedKmh
+    ? parseFloat(ext.avgSpeedKmh)
+    : (movingSeconds ? distanceKm / (movingSeconds / 3600) : null);
+
+  return {
+    points,
+    cumDist,
+    distanceKm,
+    durationSeconds,
+    movingSeconds,
+    avgSpeedKmh,
+    steps: ext.steps ? parseInt(ext.steps, 10) : null,
+    elevGain: ext.elevGain ? parseFloat(ext.elevGain) : null,
+    elevLoss: ext.elevLoss ? parseFloat(ext.elevLoss) : null,
+    pauseSeconds: ext.pauseSeconds ? parseInt(ext.pauseSeconds, 10) : null,
+  };
 }
 
 function renderMap(tracks) {
@@ -245,24 +442,28 @@ function renderMap(tracks) {
       maxZoom: 19,
     }).addTo(map);
     markersLayer = L.layerGroup().addTo(map);
+    selectedLayer = L.layerGroup().addTo(map);
   }
 
   markersLayer.clearLayers();
+  selectedLayer.clearLayers();
   const zones = groupIntoZones(tracks);
 
   if (zones.length === 0) {
     map.setView([39.5, -8], 6); // vista geral de Portugal por omissao
+    allBounds = null;
     return;
   }
 
   const bounds = [];
   for (const zone of zones) {
     const marker = L.marker([zone.lat, zone.lon], { icon: zoneMarkerIcon(zone.tracks.length) });
-    marker.bindPopup(popupHtml(zone));
+    marker.on('click', () => openZonePanel(zone));
     marker.addTo(markersLayer);
     bounds.push([zone.lat, zone.lon]);
   }
 
+  allBounds = bounds;
   if (bounds.length === 1) {
     map.setView(bounds[0], 13);
   } else {

@@ -56,7 +56,32 @@
           <button id="btn-refresh" class="btn-secondary" title="Voltar a consultar a Drive">Atualizar</button>
         </div>
         <p id="load-status" class="status-note"></p>
-        <div id="map"></div>
+        <div class="map-layout">
+          <div id="map"></div>
+          <aside id="zone-panel" class="zone-panel" hidden>
+            <button id="panel-close" class="panel-close" aria-label="Fechar painel">×</button>
+
+            <div id="panel-list-view">
+              <h3 id="panel-zone-title" class="panel-title"></h3>
+              <ul id="panel-track-list" class="panel-track-list"></ul>
+            </div>
+
+            <div id="panel-detail-view" hidden>
+              <button id="panel-back" class="panel-back">‹ Voltar à lista</button>
+              <h3 id="detail-name" class="panel-title"></h3>
+              <p id="detail-date" class="detail-sub"></p>
+              <div id="detail-metrics" class="metrics-grid"></div>
+              <div id="elev-wrap" class="elev-wrap" hidden>
+                <p class="elev-label">Perfil de elevação</p>
+                <svg id="elev-chart" viewBox="0 0 400 130" preserveAspectRatio="none"></svg>
+                <div class="elev-scale">
+                  <span id="elev-min"></span>
+                  <span id="elev-max"></span>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
         <h2 class="list-subheading">Todos os percursos</h2>
         <ul id="track-list" class="track-list"></ul>
       </div>
