@@ -455,7 +455,10 @@ function openZone(zone) {
 function trackItemHtml(t) {
   const km = t.distanceKm != null ? `${t.distanceKm.toFixed(2)} km` : '';
   const dateStr = t.date ? t.date.toLocaleDateString('pt-PT') : '';
-  const meta = [dateStr, km].filter(Boolean).join(' · ');
+  // Evita duplicar a data quando o nome do percurso ja e a propria data
+  // (o nome por omissao da app, se nunca foi renomeado)
+  const showDate = dateStr && t.name !== dateStr;
+  const meta = [showDate ? dateStr : null, km].filter(Boolean).join(' · ');
   return `<li><button class="panel-track-item" data-fileid="${esc(t.fileId || '')}">
     <span class="pt-icon">${t.activity === 'bike' ? '🚴' : '🚶'}</span>
     <span class="pt-info">
@@ -482,6 +485,21 @@ function buildPieSvg(kmByMonth) {
   if (total <= 0) return '<p class="pie-empty">Sem distância registada.</p>';
 
   const cx = 100, cy = 100, r = 92;
+
+  // Caso especial: um so mes = 100% da distancia. Um arco SVG nao
+  // consegue desenhar uma volta completa num unico comando (o ponto
+  // inicial e final coincidem e o navegador nao desenha nada) —
+  // usa-se um circulo simples em vez de um arco degenerado.
+  if (months.length === 1) {
+    const m = months[0];
+    return `
+      <svg viewBox="0 0 200 200" class="pie-svg" role="img" aria-label="Distância por mês">
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="${MONTH_COLORS[m - 1]}" />
+        <text x="${cx}" y="${cy - 6}" text-anchor="middle" class="pie-label" style="font-size:16px">${MONTH_ABBR[m - 1]}</text>
+        <text x="${cx}" y="${cy + 14}" text-anchor="middle" class="pie-label pie-label-km" style="font-size:12px">${kmByMonth[m].toFixed(0)} km</text>
+      </svg>`;
+  }
+
   let angle = -Math.PI / 2;
   let svg = `<svg viewBox="0 0 200 200" class="pie-svg" role="img" aria-label="Distância por mês">`;
   for (const m of months) {
@@ -671,10 +689,13 @@ async function openTrackDetail(track, backTo, zoneRef) {
   detailBackTo = backTo;
   detailBackZone = zoneRef || currentZone;
 
+  const dateStr = track.date ? track.date.toLocaleDateString('pt-PT') : '';
+  const showDate = dateStr && track.name !== dateStr;
+
   sidePanel.innerHTML = `
     <button id="detail-back" class="panel-back">‹ Voltar</button>
     <h2 class="panel-title">${esc(track.name)}</h2>
-    <p class="detail-sub">${track.date ? track.date.toLocaleDateString('pt-PT') : ''}</p>
+    ${showDate ? `<p class="detail-sub">${dateStr}</p>` : ''}
     <div id="detail-body"><p class="loading-note">A carregar percurso…</p></div>
   `;
   document.getElementById('detail-back').addEventListener('click', () => {
