@@ -46,10 +46,7 @@ html, body {
 .brand:hover { background: var(--green-pale); }
 .brand:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
 
-.leaf { width: 28px; height: 28px; display: inline-flex; }
-.leaf svg { width: 100%; height: 100%; }
-.leaf path { fill: var(--green); }
-.leaf .vein { fill: none; stroke: #fff; stroke-width: 4; }
+.brand-icon { width: 28px; height: 28px; border-radius: 8px; display: block; }
 
 .brand-name {
   font-size: 19px;
@@ -403,6 +400,64 @@ main { width: 100%; padding: 0 24px; }
 
 /* ---- footer ---- */
 .footer { text-align: center; padding: 20px; font-size: 12px; color: var(--ink-soft); }
+
+/* ---- toast (aviso temporario) ---- */
+.toast {
+  position: fixed;
+  top: 76px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--green-dark);
+  color: #fff;
+  font-size: 13px;
+  padding: 10px 20px;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.18);
+  z-index: 60;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.toast.show { opacity: 1; }
+
+/* ---- apagar percurso (so no detalhe) ---- */
+.delete-zone { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+
+.btn-danger-link {
+  border: none;
+  background: none;
+  color: #B71C1C;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+.btn-danger-link:hover { text-decoration: underline; }
+
+.delete-confirm {
+  margin-top: 10px;
+  background: #FDECEA;
+  border: 1px solid #F5C6C0;
+  border-radius: 10px;
+  padding: 12px;
+}
+.delete-confirm p { margin: 0 0 10px; font-size: 12.5px; color: #8C1A13; line-height: 1.5; }
+.delete-actions { display: flex; gap: 8px; }
+
+.btn-danger {
+  flex: 1;
+  border: none;
+  background: #C62828;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 9px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.btn-danger:hover { background: #B71C1C; }
+.btn-danger:disabled { opacity: 0.6; cursor: default; }
 
 @media (max-width: 860px) {
   .app-layout { flex-direction: column; height: auto; }

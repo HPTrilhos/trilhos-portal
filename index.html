@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trilhos — Portal</title>
+<link rel="icon" type="image/png" href="favicon.png">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://accounts.google.com/gsi/client" async defer></script>
@@ -13,9 +14,7 @@
 
   <header class="topbar">
     <button id="btn-home" class="brand" aria-label="Início">
-      <span class="leaf" aria-hidden="true">
-        <svg viewBox="0 0 100 100"><path d="M50,10 C74,32 82,58 65,80 C57,90 50,92 50,92 C50,92 43,90 35,80 C18,58 26,32 50,10 Z"/><path d="M50,18 L50,84" class="vein"/></svg>
-      </span>
+      <img src="icon.png" alt="" class="brand-icon">
       <span class="brand-name">Trilhos</span>
     </button>
 
@@ -53,6 +52,8 @@
       </div>
     </div>
   </header>
+
+  <div id="toast" class="toast" hidden></div>
 
   <main id="app-root">
     <!-- Estado: nao autenticado -->

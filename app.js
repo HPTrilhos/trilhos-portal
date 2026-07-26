@@ -86,6 +86,19 @@ function setStatus(msg, isError) {
   globalStatus.classList.toggle('error', !!isError);
 }
 
+let toastTimer = null;
+function showToast(msg, duration = 3500) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.hidden = false;
+  requestAnimationFrame(() => el.classList.add('show'));
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    setTimeout(() => { el.hidden = true; }, 300);
+  }, duration);
+}
+
 // ---------------------------------------------------------------
 // Sessao (identidade Google)
 // ---------------------------------------------------------------
@@ -226,6 +239,18 @@ async function downloadGpx(fileId) {
   return resp.text();
 }
 
+// Apaga o ficheiro definitivamente na Google Drive (nao e reversivel;
+// a proxima sincronizacao da app tambem deixa de o ver, ja que respeita
+// eliminacoes feitas la fora).
+async function deleteDriveFile(fileId) {
+  const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}`, {
+    method: 'DELETE',
+    headers: driveHeaders(),
+  });
+  if (resp.status === 401) throw new DriveAuthError('Sessão de acesso à Drive expirada');
+  if (!resp.ok && resp.status !== 204) throw new Error('Não foi possível apagar o percurso.');
+}
+
 // ---------------------------------------------------------------
 // Parser leve: metadados do cabecalho GPX (nome, data, distancia,
 // atividade, localidade, duracao/passos para as estatisticas mensais,
@@ -323,7 +348,8 @@ async function loadTracks() {
 
     saveCache(cache);
     allTracks = tracks;
-    setStatus(`${tracks.length} percurso${tracks.length === 1 ? '' : 's'} encontrado${tracks.length === 1 ? '' : 's'} na Drive.`);
+    setStatus('');
+    showToast(`${tracks.length} percurso${tracks.length === 1 ? '' : 's'} encontrado${tracks.length === 1 ? '' : 's'} na Drive.`);
     goHome();
   } catch (err) {
     if (err instanceof DriveAuthError) {
@@ -689,6 +715,39 @@ function parseGpxFull(xmlText) {
   };
 }
 
+async function confirmDeleteTrack(track) {
+  const btn = document.getElementById('btn-delete-confirm');
+  btn.disabled = true;
+  btn.textContent = 'A apagar…';
+  try {
+    await deleteDriveFile(track.fileId);
+
+    allTracks = allTracks.filter((t) => t.fileId !== track.fileId);
+    const cache = loadCache();
+    delete cache[track.fileId];
+    saveCache(cache);
+    delete fullGpxCache[track.fileId];
+
+    showToast('Percurso apagado da Google Drive.');
+    goHome();
+  } catch (err) {
+    if (err instanceof DriveAuthError) {
+      clearToken();
+      accessToken = null;
+      appLayout.hidden = true;
+      filterBar.hidden = true;
+      driveGateWrap.hidden = false;
+      document.getElementById('drive-gate-note').textContent =
+        'A autorização de acesso à Drive expirou. Autoriza novamente para continuar.';
+      return;
+    }
+    console.error(err);
+    showToast('Erro ao apagar o percurso — tenta novamente.', 4000);
+    btn.disabled = false;
+    btn.textContent = 'Apagar definitivamente';
+  }
+}
+
 async function openTrackDetail(track, backTo, zoneRef) {
   panelState = 'detail';
   detailBackTo = backTo;
@@ -752,7 +811,27 @@ async function openTrackDetail(track, backTo, zoneRef) {
         <div class="elev-scale"><span>${profile.eMin.toFixed(0)} m</span><span>${profile.eMax.toFixed(0)} m</span></div>`;
     }
 
-    body.innerHTML = `<div class="metrics-grid">${metrics.join('')}</div>${elevHtml}`;
+    body.innerHTML = `
+      <div class="metrics-grid">${metrics.join('')}</div>
+      ${elevHtml}
+      <div class="delete-zone">
+        <button id="btn-delete-track" class="btn-danger-link">Apagar percurso</button>
+        <div id="delete-confirm" class="delete-confirm" hidden>
+          <p>Isto apaga o percurso <strong>definitivamente</strong> da tua Google Drive — não pode ser desfeito, e o percurso deixa de existir também na app na próxima sincronização.</p>
+          <div class="delete-actions">
+            <button id="btn-delete-cancel" class="btn-secondary">Cancelar</button>
+            <button id="btn-delete-confirm" class="btn-danger">Apagar definitivamente</button>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('btn-delete-track').addEventListener('click', () => {
+      document.getElementById('delete-confirm').hidden = false;
+    });
+    document.getElementById('btn-delete-cancel').addEventListener('click', () => {
+      document.getElementById('delete-confirm').hidden = true;
+    });
+    document.getElementById('btn-delete-confirm').addEventListener('click', () => confirmDeleteTrack(track));
 
     if (selectedLayer) selectedLayer.clearLayers();
     const latlngs = detail.points.map((p) => [p.lat, p.lon]);
