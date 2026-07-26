@@ -49,6 +49,7 @@ let currentYear = null;
 let detailBackTo = null;
 let detailBackZone = null;
 const expandedMonths = new Set();
+const defaultExpandedYears = new Set(); // anos que ja receberam a abertura automatica do 1o mes
 const fullGpxCache = {};
 
 // Filtros (afetam mapa + painel; qualquer alteracao volta ao resumo geral)
@@ -549,8 +550,12 @@ function renderSummaryPanel(visible) {
   }
   const months = Object.keys(byMonth).map(Number).sort((a, b) => b - a);
 
-  const anyExpanded = months.some((m) => expandedMonths.has(`${currentYear}-${m}`));
-  if (!anyExpanded && months.length) expandedMonths.add(`${currentYear}-${months[0]}`);
+  // Abre o mes mais recente por omissao, mas so na primeira vez que este
+  // ano e mostrado — nao forcar de novo se o utilizador o fechar depois.
+  if (!defaultExpandedYears.has(currentYear) && months.length) {
+    expandedMonths.add(`${currentYear}-${months[0]}`);
+    defaultExpandedYears.add(currentYear);
+  }
 
   let html = `
     <div class="panel-summary-header">
