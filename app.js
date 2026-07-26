@@ -8,7 +8,7 @@
 
 const CLIENT_ID = '271389330523-4jg4e39cgf31v7mecjabj4hji6pjug1k.apps.googleusercontent.com';
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-const CACHE_KEY = 'trilhos_portal_cache_v1';
+const CACHE_KEY = 'trilhos_portal_cache_v2';
 const SESSION_KEY = 'trilhos_portal_session';
 
 const viewLogin = document.getElementById('view-login');
@@ -151,6 +151,7 @@ function parseGpxMeta(xmlText, fallbackName) {
   const lon = firstPt ? parseFloat(firstPt.getAttribute('lon')) : null;
 
   return {
+    fileId: null, // preenchido no chamador (loadTracks), onde o file.id esta disponivel
     name: metaName || trkName || fallbackName,
     date: metaTime ? new Date(metaTime) : null,
     activity: ext.activity || (trk?.getElementsByTagName('type')[0]?.textContent === 'cycling' ? 'bike' : 'walk'),
@@ -176,6 +177,97 @@ function loadCache() {
 
 function saveCache(cache) {
   localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
+}
+
+// ---------------------------------------------------------------
+// Mapa (Fase P3): agrupa percursos por proximidade do ponto de
+// partida (~500m) e desenha um pino por zona. Clicar no pino mostra
+// um resumo (lista de percursos dessa zona) — a analise completa de
+// um percurso (traçado, elevação, Google Earth) entra na Fase P4.
+// ---------------------------------------------------------------
+
+const ZONE_RADIUS_M = 500;
+let map = null;
+let markersLayer = null;
+
+// Distancia aproximada entre duas coordenadas, em metros (formula de Haversine)
+function haversineM(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function groupIntoZones(tracks) {
+  const zones = [];
+  for (const t of tracks) {
+    if (t.lat == null || t.lon == null) continue;
+    let zone = zones.find((z) => haversineM(z.lat, z.lon, t.lat, t.lon) <= ZONE_RADIUS_M);
+    if (!zone) {
+      zone = { lat: t.lat, lon: t.lon, label: t.locality || t.name, tracks: [] };
+      zones.push(zone);
+    }
+    zone.tracks.push(t);
+  }
+  return zones;
+}
+
+function zoneMarkerIcon(count) {
+  return L.divIcon({
+    className: '',
+    html: `<div class="zone-marker" style="width:${count > 1 ? 34 : 26}px;height:${count > 1 ? 34 : 26}px;">${count}</div>`,
+    iconSize: count > 1 ? [34, 34] : [26, 26],
+  });
+}
+
+function popupHtml(zone) {
+  const list = [...zone.tracks]
+    .sort((a, b) => (b.date || 0) - (a.date || 0))
+    .map((t) => {
+      const km = t.distanceKm != null ? `${t.distanceKm.toFixed(2)} km` : '';
+      const icon = t.activity === 'bike' ? '🚴' : '🚶';
+      const dateStr = t.date ? t.date.toLocaleDateString('pt-PT') : '';
+      return `<div class="popup-track"><span class="n">${icon} ${t.name}<br><small>${dateStr}</small></span><span class="k">${km}</span></div>`;
+    })
+    .join('');
+  return `<div class="popup-zone"><h3>${zone.label}</h3>${list}</div>`;
+}
+
+function renderMap(tracks) {
+  if (!map) {
+    map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    markersLayer = L.layerGroup().addTo(map);
+  }
+
+  markersLayer.clearLayers();
+  const zones = groupIntoZones(tracks);
+
+  if (zones.length === 0) {
+    map.setView([39.5, -8], 6); // vista geral de Portugal por omissao
+    return;
+  }
+
+  const bounds = [];
+  for (const zone of zones) {
+    const marker = L.marker([zone.lat, zone.lon], { icon: zoneMarkerIcon(zone.tracks.length) });
+    marker.bindPopup(popupHtml(zone));
+    marker.addTo(markersLayer);
+    bounds.push([zone.lat, zone.lon]);
+  }
+
+  if (bounds.length === 1) {
+    map.setView(bounds[0], 13);
+  } else {
+    map.fitBounds(bounds, { padding: [32, 32] });
+  }
 }
 
 // ---------------------------------------------------------------
@@ -211,6 +303,7 @@ async function loadTracks() {
         const xml = await downloadGpx(file.id);
         const meta = parseGpxMeta(xml, file.name);
         if (meta) {
+          meta.fileId = file.id;
           cache[file.id] = { modifiedTime: file.modifiedTime, meta };
           tracks.push(meta);
         }
@@ -220,6 +313,7 @@ async function loadTracks() {
     }
 
     saveCache(cache);
+    renderMap(tracks);
     renderTracks(tracks);
     loadStatus.textContent = `${tracks.length} percurso${tracks.length === 1 ? '' : 's'} encontrado${tracks.length === 1 ? '' : 's'} na Drive.`;
   } catch (err) {

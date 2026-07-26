@@ -5,8 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Trilhos — Portal</title>
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <!-- Google Identity Services: biblioteca oficial para login Google em paginas estaticas -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 </head>
 <body>
 
@@ -50,10 +52,12 @@
 
       <div id="track-area" hidden>
         <div class="list-header">
-          <h2>Os teus percursos</h2>
+          <h2>Mapa dos teus percursos</h2>
           <button id="btn-refresh" class="btn-secondary" title="Voltar a consultar a Drive">Atualizar</button>
         </div>
         <p id="load-status" class="status-note"></p>
+        <div id="map"></div>
+        <h2 class="list-subheading">Todos os percursos</h2>
         <ul id="track-list" class="track-list"></ul>
       </div>
     </section>
