@@ -10,6 +10,10 @@ const CLIENT_ID = '271389330523-4jg4e39cgf31v7mecjabj4hji6pjug1k.apps.googleuser
 const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 const CACHE_KEY = 'trilhos_portal_cache_v2';
 const SESSION_KEY = 'trilhos_portal_session';
+const TOKEN_KEY = 'trilhos_portal_token_v1';
+// Margem de seguranca antes da expiracao real do token (pede um novo cedo,
+// para nunca tentar usar um token que ja caducou por segundos)
+const TOKEN_SAFETY_MARGIN_MS = 60 * 1000;
 
 const viewLogin = document.getElementById('view-login');
 const viewAuthed = document.getElementById('view-authed');
@@ -49,6 +53,8 @@ function showLogin() {
   driveGate.hidden = false;
   trackArea.hidden = true;
   accessToken = null;
+  document.getElementById('drive-gate-note').innerHTML =
+    'Falta autorizar o acesso à pasta <strong>Trilhos/</strong> na tua Google Drive (só os ficheiros criados pela app — nada mais é tocado).';
 }
 
 function handleCredentialResponse(response) {
@@ -65,6 +71,25 @@ function handleCredentialResponse(response) {
 // Acesso a Drive (Fase P2)
 // ---------------------------------------------------------------
 
+function saveToken(accessTokenValue, expiresInSeconds) {
+  const expiresAt = Date.now() + expiresInSeconds * 1000;
+  localStorage.setItem(TOKEN_KEY, JSON.stringify({ token: accessTokenValue, expiresAt }));
+}
+
+function loadValidToken() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TOKEN_KEY));
+    if (saved && saved.expiresAt - TOKEN_SAFETY_MARGIN_MS > Date.now()) {
+      return saved.token;
+    }
+  } catch (_) { /* sem token guardado ou invalido */ }
+  return null;
+}
+
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+}
+
 function ensureTokenClient() {
   if (tokenClient) return tokenClient;
   tokenClient = google.accounts.oauth2.initTokenClient({
@@ -76,6 +101,7 @@ function ensureTokenClient() {
         return;
       }
       accessToken = resp.access_token;
+      saveToken(resp.access_token, resp.expires_in);
       loadTracks();
     },
   });
@@ -86,6 +112,8 @@ function driveHeaders() {
   return { Authorization: `Bearer ${accessToken}` };
 }
 
+class DriveAuthError extends Error {}
+
 async function findTrilhosFolder() {
   const q = encodeURIComponent(
     "name='Trilhos' and mimeType='application/vnd.google-apps.folder' and trashed=false and 'root' in parents"
@@ -93,6 +121,7 @@ async function findTrilhosFolder() {
   const resp = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`, {
     headers: driveHeaders(),
   });
+  if (resp.status === 401) throw new DriveAuthError('Sessão de acesso à Drive expirada');
   if (!resp.ok) throw new Error('Não foi possível consultar a Google Drive.');
   const data = await resp.json();
   return (data.files && data.files[0]) ? data.files[0].id : null;
@@ -106,6 +135,7 @@ async function listGpxFiles(folderId) {
     `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=1000`,
     { headers: driveHeaders() }
   );
+  if (resp.status === 401) throw new DriveAuthError('Sessão de acesso à Drive expirada');
   if (!resp.ok) throw new Error('Não foi possível listar os ficheiros da pasta Trilhos/.');
   const data = await resp.json();
   return (data.files || []).filter((f) => f.name.toLowerCase().endsWith('.gpx'));
@@ -115,6 +145,7 @@ async function downloadGpx(fileId) {
   const resp = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: driveHeaders(),
   });
+  if (resp.status === 401) throw new DriveAuthError('Sessão de acesso à Drive expirada');
   if (!resp.ok) throw new Error('Não foi possível descarregar um percurso.');
   return resp.text();
 }
@@ -496,7 +527,10 @@ async function loadTracks() {
     for (const file of files) {
       const cached = cache[file.id];
       if (cached && cached.modifiedTime === file.modifiedTime) {
-        tracks.push(cached.meta);
+        // localStorage so guarda texto: a data volta como string, tem
+        // de ser reconstruida como objeto Date antes de ser usada.
+        const meta = { ...cached.meta, date: cached.meta.date ? new Date(cached.meta.date) : null };
+        tracks.push(meta);
         continue;
       }
       loadStatus.textContent = `A descarregar percursos… (${++downloaded})`;
@@ -518,6 +552,16 @@ async function loadTracks() {
     renderTracks(tracks);
     loadStatus.textContent = `${tracks.length} percurso${tracks.length === 1 ? '' : 's'} encontrado${tracks.length === 1 ? '' : 's'} na Drive.`;
   } catch (err) {
+    if (err instanceof DriveAuthError) {
+      // Token expirado ou revogado: limpar e voltar a pedir autorizacao
+      clearToken();
+      accessToken = null;
+      trackArea.hidden = true;
+      driveGate.hidden = false;
+      document.getElementById('drive-gate-note').textContent =
+        'A autorização de acesso à Drive expirou. Autoriza novamente para continuar.';
+      return;
+    }
     console.error(err);
     loadStatus.textContent = err.message || 'Ocorreu um erro a ler a Google Drive.';
   }
@@ -571,6 +615,13 @@ function init() {
   if (saved) {
     try {
       showAuthed(JSON.parse(saved));
+      // Se ainda houver um token de Drive valido guardado, entra direto
+      // no mapa sem pedir para clicar em "Ver os meus percursos" outra vez.
+      const validToken = loadValidToken();
+      if (validToken) {
+        accessToken = validToken;
+        loadTracks();
+      }
     } catch (_) {
       sessionStorage.removeItem(SESSION_KEY);
     }
@@ -595,6 +646,7 @@ function init() {
 
 btnSignout.addEventListener('click', () => {
   sessionStorage.removeItem(SESSION_KEY);
+  clearToken();
   if (window.google && google.accounts && google.accounts.id) {
     google.accounts.id.disableAutoSelect();
   }
