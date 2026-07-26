@@ -329,6 +329,15 @@ main { width: 100%; padding: 0 24px; }
 }
 
 .month-tracks { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.month-tracks[hidden] { display: none; }
+
+/* Salvaguarda geral: sempre que uma classe define display (flex/grid/etc)
+   e o elemento tambem e escondido via JS com o atributo hidden, o CSS do
+   autor teria precedencia sobre a regra nativa [hidden]{display:none} e
+   o elemento ficaria visivel na mesma. Esta regra devolve o hidden ao
+   controlo total nesses casos. */
+.app-layout[hidden],
+.filter-bar[hidden] { display: none; }
 
 /* ---- itens de percurso (reutilizado no resumo e na zona) ---- */
 .panel-track-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
